@@ -1,40 +1,92 @@
 import mongoose from 'mongoose';
 import { UserModel, IUser } from './user.js';
+import { PostModel, IPost } from './post.js';
 
 async function main() {
-  mongoose.set('strictQuery', true); // Mantiene el comportamiento actual
+  mongoose.set('strictQuery', true);
 
-  await mongoose.connect('mongodb://127.0.0.1:27017/test')
-  .then(() => console.log('Conectado a MongoDB'))
-  .catch(err => console.error('Error al conectar:', err));
+  await mongoose.connect('mongodb://localhost:27017/')
+    .then(() => console.log('Connected to MongoDB'))
+    .catch((err: any) => console.error('Network error:', err));
 
-  const user1:  IUser = {
-    "name": 'Bill',
-    "email": 'bill@initech.com',
-    "avatar": 'https://i.imgur.com/dM7Thhn.png'
+  const user: IUser = {
+    name: 'Bill',
+    email: 'bill@initech.com',
+    avatar: 'https://i.imgur.com/dM7Thhn.png',
+    posts: []
   };
 
-  console.log("user1", user1); 
-  const newUser= new UserModel(user1);
-  const user2: IUser = await newUser.save();
-  console.log("user2",user2);
+  const newUser = new UserModel(user);
+  const savedUser = await newUser.save();
 
-  // findById devuelve un objeto usando el _id.
-  const user3: IUser | null = await UserModel.findById(user2._id);
-  console.log("user3",user3);
+  const post: Partial<IPost> = {
+    title: 'My first post',
+    content: 'Post content',
+    author: savedUser._id,
+    tags: ['tech', 'mongoose']
+  };
 
-  // findOne devuelve un objeto usando un filtro.
-  const user4: IUser | null = await UserModel.findOne({name: 'Bill'});
-  console.log("user4",user4);
+  const newPost = new PostModel(post);
+  const savedPost = await newPost.save();
 
-  // Partial<IUser> Indica que el objeto puede tener solo algunos campos de IUser.
-  // select('name email') solo devuelve name y email.
-  // lean() devuelve un objeto plano de JS en lugar de un documento de Mongoose.
-  const user5: Partial<IUser> | null  = await UserModel.findOne({ name: 'Bill' })
-    .select('name email').lean();
-  console.log("user5",user5);
+  await UserModel.findByIdAndUpdate(savedUser._id, {
+    $push: { posts: savedPost._id }
+  });
+
+  const userWithPosts = await UserModel.findById(savedUser._id)
+    .populate('posts');
+  console.log('Post user:', userWithPosts);
+
+  const postWithAuthor = await PostModel.findById(savedPost._id)
+    .populate('author');
+  console.log('Author post:', postWithAuthor);
+
+  await PostModel.findByIdAndUpdate(savedPost._id, {
+    title: 'Updated title'
+  });
+  console.log('Updated pos');
+
+  await PostModel.findByIdAndDelete(savedPost._id);
+  console.log('Eliminated post');
+
+  const usersWithPostCount = await UserModel.aggregate([
+    {
+      $lookup: {
+        from: 'posts',
+        localField: 'posts',
+        foreignField: '_id',
+        as: 'postDetails'
+      }
+    },
+    {
+      $project: {
+        name: 1,
+        email: 1,
+        postCount: { $size: '$postDetails' },
+        latestPost: { $arrayElemAt: ['$postDetails.title', 0] }
+      }
+    }
+  ]);
+  console.log('Users with post count:', usersWithPostCount);
+
+  const postStats = await PostModel.aggregate([
+    {
+      $group: {
+        _id: '$author',
+        totalPosts: { $sum: 1 },
+        avgContentLength: { $avg: { $strLenCP: '$content' } }
+      }
+    },
+    {
+      $lookup: {
+        from: 'users',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'authorInfo'
+      }
+    }
+  ]);
+  console.log('Post stadistics:', postStats);
 }
 
-main()
-
-    
+main().catch(console.error);
